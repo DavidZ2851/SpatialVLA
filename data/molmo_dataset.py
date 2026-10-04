@@ -9,6 +9,12 @@ and a chunk of `chunk` normalized 7-D actions in SpatialVLA's EEF_POS convention
     relabeled state deltas), drpy = euler_xyz(R_{t+1} R_t^T) (applied on the left), and the gripper
     absolute with 1 = open (from the commanded gripper at t).
 
+With drop_idle, no-op frames are removed first (as OpenVLA does for LIBERO): no motion
+(|dxyz| < 0.2 mm, |drpy| < 1e-3 rad) with the gripper open and unchanged. That is the robot
+waiting before it starts, while the planner settles, and the ~35 idle steps that end every
+demo; otherwise this all-zero, gripper-open chunk is the most common label and the policy
+collapses to it from unfamiliar views. Idle steps with the gripper closed (grasp settling) stay.
+
 Chunks past the end of an episode get zero motion and repeat the last gripper value, as
 data/traj_transforms.chunk_act_obs does. dxyz/drpy are normalized to [-1, 1] with this dataset's
 q01/q99 (BOUNDS_Q99), and the statistics are exposed in the format the processor stores, so
@@ -53,6 +59,13 @@ def episode_actions(state: np.ndarray, action: np.ndarray) -> np.ndarray:
     return out
 
 
+def idle_mask(acts: np.ndarray) -> np.ndarray:
+    """True for no-op steps: no motion, gripper open and unchanged from the previous step."""
+    still = (np.linalg.norm(acts[:, 0:3], axis=1) < 2e-4) & (np.linalg.norm(acts[:, 3:6], axis=1) < 1e-3)
+    prev = np.concatenate([acts[:1, 6], acts[:-1, 6]])
+    return still & (acts[:, 6] > 0.5) & (prev == acts[:, 6])
+
+
 def decode_video(path: Path) -> np.ndarray:
     with av.open(str(path)) as c:
         return np.stack([f.to_ndarray(format="rgb24") for f in c.decode(video=0)])
@@ -71,6 +84,7 @@ class MolmoLeRobotDataset(torch.utils.data.Dataset):
         max_length: int = 2048,
         augment: bool = True,
         vla_processor=None,
+        drop_idle: bool = False,
     ):
         self.root, self.name, self.chunk, self.max_length = Path(root), name, chunk, max_length
         self.vla_processor = vla_processor
@@ -91,11 +105,16 @@ class MolmoLeRobotDataset(torch.utils.data.Dataset):
             state = np.stack(df["observation.state"].to_numpy())[:, EEF]
             action = np.stack(df["action"].to_numpy())
             frames = decode_video(self.root / "videos" / chunk_dir / image_key / f"episode_{ep:06d}.mp4")[: len(df)]
+            acts = episode_actions(state, action)
+            if drop_idle:
+                # the removed steps have no motion, so the kept steps' deltas still chain
+                keep = ~idle_mask(acts)
+                frames, acts = frames[keep], acts[keep]
             self.frames.append(frames)
-            self.actions.append(episode_actions(state, action))
+            self.actions.append(acts)
             self.lang.append(tasks[int(df["task_index"].iloc[0])].lower())
             self.K.append(torch.tensor(scale @ np.asarray(intr["intrinsics"][ep]), dtype=torch.float32))
-            self.index += [(ep, t) for t in range(len(df))]
+            self.index += [(ep, t) for t in range(len(acts))]
 
         motion = np.concatenate([a[:-1, :6] for a in self.actions])  # exclude the zero last steps
         allact = np.concatenate(self.actions)
@@ -128,7 +147,8 @@ class MolmoLeRobotDataset(torch.utils.data.Dataset):
             if augment
             else None
         )
-        print(f"[MolmoLeRobotDataset] {name}: {len(self.actions)} episodes, {len(self.index)} samples, "
+        print(f"[MolmoLeRobotDataset] {name}: {len(self.actions)} episodes, {len(self.index)} samples"
+              f"{' (idle frames dropped)' if drop_idle else ''}, "
               f"q01 {np.round(self.q01, 4).tolist()} q99 {np.round(self.q99, 4).tolist()}")
 
     def __len__(self):

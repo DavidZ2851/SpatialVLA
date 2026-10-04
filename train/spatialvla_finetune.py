@@ -152,6 +152,10 @@ class DataTrainingArguments:
     molmo_intrinsics: Optional[str] = field(
         default=None, metadata={"help": "Per-episode intrinsics json (scripts/molmo/episode_intrinsics.py)."}
     )
+    molmo_drop_idle: bool = field(
+        default=False,
+        metadata={"help": "Drop no-op frames (no motion, gripper open and unchanged), as OpenVLA's LIBERO data."},
+    )
 
 def main():
     launcher = os.environ.get("LAUNCHER", "slurm")
@@ -229,6 +233,7 @@ def main():
             data_args.molmo_intrinsics,
             chunk=data_args.action_forward_steps + 1,
             max_length=data_args.max_seq_length,
+            drop_idle=data_args.molmo_drop_idle,
         )
         eval_dataset = None
         if dist.get_rank() == 0:
