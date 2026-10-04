@@ -29,7 +29,6 @@ from transformers.utils.logging import (
     enable_explicit_format,
     set_verbosity,
 )
-from data.dataset import build_datasets
 from model import (
     SpatialVLAConfig,
     SpatialVLAForConditionalGeneration,
@@ -143,6 +142,16 @@ class DataTrainingArguments:
     use_raw_dataloader: Optional[bool] = field(
         default=True, metadata={"help": "Whether to use raw dataloader"}
     )
+    molmo_root: Optional[str] = field(
+        default=None,
+        metadata={"help": "A MolmoSpaces LeRobot dataset (data/molmo_dataset.py) instead of the RLDS mixture."},
+    )
+    molmo_name: Optional[str] = field(
+        default="molmo_franka/1.0.0", metadata={"help": "Statistics / unnorm key for the MolmoSpaces dataset."}
+    )
+    molmo_intrinsics: Optional[str] = field(
+        default=None, metadata={"help": "Per-episode intrinsics json (scripts/molmo/episode_intrinsics.py)."}
+    )
 
 def main():
     launcher = os.environ.get("LAUNCHER", "slurm")
@@ -211,11 +220,28 @@ def main():
         model.vision_tower.config._attn_implementation = model.config.vision_config._attn_implementation_internal = "flash_attention_2"
 
     # 2. build datasets
-    train_dataset, eval_dataset = build_datasets(
-        data_args,
-        training_args.output_dir,
-        vla_processor=None,
-    )
+    if data_args.molmo_root:
+        from data.molmo_dataset import MolmoLeRobotDataset
+
+        train_dataset = MolmoLeRobotDataset(
+            data_args.molmo_root,
+            data_args.molmo_name,
+            data_args.molmo_intrinsics,
+            chunk=data_args.action_forward_steps + 1,
+            max_length=data_args.max_seq_length,
+        )
+        eval_dataset = None
+        if dist.get_rank() == 0:
+            os.makedirs(training_args.output_dir, exist_ok=True)
+            json.dump(train_dataset.ds_stats_pc, open(os.path.join(training_args.output_dir, "ds_stats.json"), "w"), indent=2)
+    else:
+        from data.dataset import build_datasets  # RLDS / TensorFlow
+
+        train_dataset, eval_dataset = build_datasets(
+            data_args,
+            training_args.output_dir,
+            vla_processor=None,
+        )
 
     # 3. build action tokenizer from current project
     action_tokenizer = SpatialActionTokenizer(
