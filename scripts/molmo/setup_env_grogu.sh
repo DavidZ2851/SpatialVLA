@@ -11,4 +11,5 @@ uv pip install "torch==2.7.1" "torchvision==0.22.1" "transformers==4.47.0" "toke
     "datasets==3.0.2" tensorboard h5py huggingface_hub tqdm \
     --extra-index-url https://download.pytorch.org/whl/cu128 --index-strategy unsafe-best-match
 python -c "import torch, transformers, peft; print(torch.__version__, torch.cuda.is_available(), transformers.__version__, peft.__version__)"
-huggingface-cli download IPEC-COMMUNITY/spatialvla-4b-224-pt --local-dir ${MODEL_DIR:-$HOME/spatialvla_pretrained/spatialvla-4b-224-pt}
+# HF_HOME may point at node-local /scratch (absent on the login node): keep the hub cache in $HOME
+HF_HOME=$HOME/.cache/huggingface HF_HUB_DISABLE_XET=1 huggingface-cli download IPEC-COMMUNITY/spatialvla-4b-224-pt --local-dir ${MODEL_DIR:-$HOME/spatialvla_pretrained/spatialvla-4b-224-pt}
