@@ -26,5 +26,5 @@ torchrun --standalone --nnodes=1 --nproc-per-node $NGPU --master_port ${MASTER_P
   --save_strategy steps --save_steps $SAVE --save_total_limit ${KEEP:-20} \
   --learning_rate ${LR:-5e-4} --weight_decay 0.0 --warmup_ratio 0.005 --lr_scheduler_type linear \
   --logging_steps ${LOG_STEPS:-50} --do_train True \
-  --grad_checkpoint True --deepspeed scripts/zero1.json \
+  --grad_checkpoint True --deepspeed ${DS_CONFIG:-scripts/molmo/zero1_torch_adam.json} \
   --report_to ${REPORT:-tensorboard} --log_level warning ${EXTRA}
